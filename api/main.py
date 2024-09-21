@@ -1,58 +1,56 @@
+import os
 from flask import Flask, jsonify, request
-from bs4 import BeautifulSoup
-import requests
+from requests_html import HTMLSession
 
 app = Flask(__name__)
 
-# Route pour rechercher les chansons d'un chanteur
-@app.route('/search', methods=['GET'])
-def search_songs():
-    chanteur = request.args.get('chanteur')
-    if not chanteur:
-        return jsonify({'error': 'Chanteur non spécifié'}), 400
+@app.route('/')
+def home():
+    return "Welcome to the Tononkira Scraper!"
 
-    # URL du site à scraper avec le nom du chanteur
-    url = f"https://tononkira.serasera.org/tononkira?lohateny={chanteur}"
-    response = requests.get(url)
-    
-    if response.status_code != 200:
-        return jsonify({'error': 'Impossible d\'accéder à la page'}), 500
-    
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Extraire les chansons listées
+@app.route('/search', methods=['GET'])
+def search_chanteur():
+    # Récupérer le nom du chanteur depuis les paramètres GET
+    chanteur = request.args.get('chanteur')
+
+    # Vérifier si le paramètre existe
+    if not chanteur:
+        return jsonify({"message": "Veuillez fournir le nom d'un chanteur."}), 400
+
+    # Créer une session HTML
+    s = HTMLSession()
+
+    # URL de recherche avec le nom du chanteur
+    url = f'https://tononkira.serasera.org/tononkira?lohateny={chanteur}'
+
+    # Faire une requête GET
+    r = s.get(url)
+
+    # Vérifier si la requête a réussi
+    if r.status_code != 200:
+        return jsonify({"message": "Impossible d'accéder au site Tononkira."}), 500
+
+    # Extraire les chansons depuis le contenu HTML
+    songs = r.html.find('a.m')  # Mettre à jour ce sélecteur si nécessaire
+
+    # Si aucune chanson n'est trouvée
+    if not songs:
+        return jsonify({"message": f"Aucune chanson trouvée pour ce chanteur : {chanteur}"}), 404
+
+    # Lister les chansons et leurs liens
     song_list = []
-    songs = soup.find_all('a', class_='m')
-    
     for song in songs:
         title = song.text.strip()
-        href = song['href']
-        song_list.append({'title': title, 'link': f"https://tononkira.serasera.org{href}"})
-    
-    if not song_list:
-        return jsonify({'message': 'Aucune chanson trouvée pour ce chanteur'}), 404
+        href = song.attrs['href']
+        full_url = f"https://tononkira.serasera.org{href}"
+        song_list.append({
+            'title': title,
+            'link': full_url
+        })
 
-    return jsonify({'chanteur': chanteur, 'chansons': song_list})
+    # Retourner les données en format JSON
+    return jsonify(song_list)
 
-# Route pour afficher les détails d'une chanson
-@app.route('/song', methods=['GET'])
-def get_song():
-    song_url = request.args.get('url')
-    if not song_url:
-        return jsonify({'error': 'URL de la chanson non spécifiée'}), 400
-
-    response = requests.get(song_url)
-    
-    if response.status_code != 200:
-        return jsonify({'error': 'Impossible d\'accéder à la page'}), 500
-    
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Extraire les détails de la chanson
-    song_title = soup.find('h1').text.strip()
-    lyrics = soup.find('div', {'id': 'songLyric'}).text.strip()
-
-    return jsonify({'title': song_title, 'lyrics': lyrics})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
